@@ -296,19 +296,8 @@ with aba4:
         filter=True,
     )
 
-    gb.configure_column(
-        "Grupo",
-        pinned="left",
-        editable=False,
-        width=130,
-    )
-
-    gb.configure_column(
-        "Time",
-        pinned="left",
-        editable=False,
-        width=100,
-    )
+    gb.configure_column("Grupo", pinned="left", editable=False, width=130)
+    gb.configure_column("Time", pinned="left", editable=False, width=100)
 
     for col in colunas_numeros:
         gb.configure_column(
@@ -429,6 +418,20 @@ with aba5:
     )
 
 st.divider()
+
+total_figurinhas = len(df)
+total_tenho = df["Tenho"].str.lower().eq("sim").sum()
+total_faltam = total_figurinhas - total_tenho
+percentual = round(total_tenho / total_figurinhas * 100, 1)
+
+st.subheader("📊 Progresso do Álbum")
+
+c1, c2, c3, c4 = st.columns(4)
+
+c1.metric("Total Figurinhas", total_figurinhas)
+c2.metric("Tenho", total_tenho)
+c3.metric("Faltam", total_faltam)
+c4.metric("% Completo", f"{percentual}%")
 
 st.subheader("Resumo geral")
 
