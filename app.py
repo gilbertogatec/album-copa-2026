@@ -261,7 +261,9 @@ st.dataframe(
     resumo,
     use_container_width=True,
     hide_index=True
-)def interpretar_consulta(texto):
+)
+
+def interpretar_consulta(texto):
     texto = texto.upper().strip()
     partes = texto.split()
 
