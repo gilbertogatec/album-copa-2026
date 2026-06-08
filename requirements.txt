@@ -3,3 +3,5 @@ pandas
 gspread
 google-auth
 streamlit-aggrid
+pillow
+rapidocr-onnxruntime
