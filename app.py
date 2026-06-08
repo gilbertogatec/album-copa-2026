@@ -4,6 +4,7 @@ import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 st.set_page_config(page_title="Controle Álbum Copa 2026", layout="wide")
 
@@ -130,6 +131,22 @@ def gerar_resumo(df):
     return resumo
 
 
+def gerar_matriz_aggrid(df):
+    base = df.copy()
+    base["TenhoBool"] = base["Tenho"].str.lower().eq("sim")
+
+    matriz = base.pivot_table(
+        index=["Grupo", "Time"],
+        columns="Numero",
+        values="TenhoBool",
+        aggfunc="first",
+    ).reset_index()
+
+    matriz.columns = [str(c) for c in matriz.columns]
+
+    return matriz
+
+
 def gerar_matriz_visual(df):
     matriz = df.copy()
     matriz["Status"] = matriz["Tenho"].str.lower().eq("sim").map(
@@ -149,24 +166,9 @@ def gerar_matriz_visual(df):
     return matriz
 
 
-def gerar_matriz_editavel(df):
-    matriz = df.copy()
-    matriz["TenhoBool"] = matriz["Tenho"].str.lower().eq("sim")
-
-    matriz = matriz.pivot_table(
-        index=["Grupo", "Time"],
-        columns="Numero",
-        values="TenhoBool",
-        aggfunc="first",
-        fill_value=False,
-    ).reset_index()
-
-    matriz.columns = [str(c) for c in matriz.columns]
-
-    return matriz
-
-
 st.title("🏆 Controle Álbum Copa 2026")
+
+df = carregar_dados()
 
 aba1, aba2, aba3, aba4, aba5 = st.tabs(
     [
@@ -178,10 +180,11 @@ aba1, aba2, aba3, aba4, aba5 = st.tabs(
     ]
 )
 
-df = carregar_dados()
-
 with aba1:
-    consulta = st.text_input("Consulta rápida. Ex: BRA 5, FWC 2, CC 10")
+    consulta = st.text_input(
+        "Consulta rápida. Ex: BRA 5, FWC 2, CC 10",
+        key="consulta_rapida",
+    )
 
     if consulta:
         time, numero = interpretar_consulta(consulta)
@@ -226,9 +229,12 @@ with aba1:
 with aba2:
     st.subheader("Adicionar figurinha")
 
-    nova = st.text_input("Digite a nova figurinha. Ex: BRA 6")
+    nova = st.text_input(
+        "Digite a nova figurinha. Ex: BRA 6",
+        key="inserir_figurinha",
+    )
 
-    if st.button("Adicionar"):
+    if st.button("Adicionar", key="botao_adicionar"):
         time, numero = interpretar_consulta(nova)
 
         if not time or not numero:
@@ -246,9 +252,12 @@ with aba2:
 with aba3:
     st.subheader("Remover figurinha")
 
-    remover = st.text_input("Digite a figurinha para remover. Ex: BRA 6")
+    remover = st.text_input(
+        "Digite a figurinha para remover. Ex: BRA 6",
+        key="remover_figurinha",
+    )
 
-    if st.button("Remover"):
+    if st.button("Remover", key="botao_remover"):
         time, numero = interpretar_consulta(remover)
 
         if not time or not numero:
@@ -267,30 +276,66 @@ with aba4:
     st.subheader("Matriz completa editável")
 
     st.write(
-        "Marque a caixa para adicionar a figurinha. Desmarque para remover. "
-        "Depois clique em salvar."
+        "As colunas Grupo e Time ficam fixas. "
+        "Marque para adicionar. Desmarque para remover. Depois clique em salvar."
     )
 
-    matriz_original = gerar_matriz_editavel(df)
+    matriz_original = gerar_matriz_aggrid(df)
 
     colunas_numeros = [
         col for col in matriz_original.columns
         if col not in ["Grupo", "Time"]
     ]
 
-    matriz_editada = st.data_editor(
-        matriz_original,
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Grupo", "Time"],
-        column_config={
-            col: st.column_config.CheckboxColumn(col)
-            for col in colunas_numeros
-        },
-        key="matriz_editavel",
+    gb = GridOptionsBuilder.from_dataframe(matriz_original)
+
+    gb.configure_default_column(
+        editable=True,
+        resizable=True,
+        sortable=True,
+        filter=True,
     )
 
-    if st.button("Salvar alterações da matriz"):
+    gb.configure_column(
+        "Grupo",
+        pinned="left",
+        editable=False,
+        width=130,
+    )
+
+    gb.configure_column(
+        "Time",
+        pinned="left",
+        editable=False,
+        width=100,
+    )
+
+    for col in colunas_numeros:
+        gb.configure_column(
+            col,
+            editable=True,
+            width=75,
+            cellRenderer="agCheckboxCellRenderer",
+            cellEditor="agCheckboxCellEditor",
+        )
+
+    grid_options = gb.build()
+
+    grid_response = AgGrid(
+        matriz_original,
+        gridOptions=grid_options,
+        height=650,
+        fit_columns_on_grid_load=False,
+        data_return_mode=DataReturnMode.AS_INPUT,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
+        allow_unsafe_jscode=True,
+        theme="streamlit",
+        key="aggrid_matriz_album",
+    )
+
+    matriz_editada = pd.DataFrame(grid_response["data"])
+
+    if st.button("Salvar alterações da matriz", key="salvar_matriz_aggrid"):
         ws = conectar_google_sheets()
         df_atual = carregar_dados()
 
@@ -308,8 +353,17 @@ with aba4:
             for col in colunas_numeros:
                 numero = int(col)
 
-                novo_valor = bool(linha[col])
-                valor_antigo = bool(linha_original[col])
+                novo_bruto = linha.get(col)
+                antigo_bruto = linha_original.get(col)
+
+                if pd.isna(novo_bruto) and pd.isna(antigo_bruto):
+                    continue
+
+                if pd.isna(novo_bruto):
+                    continue
+
+                novo_valor = bool(novo_bruto)
+                valor_antigo = False if pd.isna(antigo_bruto) else bool(antigo_bruto)
 
                 if novo_valor != valor_antigo:
                     filtro = (
@@ -338,6 +392,7 @@ with aba4:
     st.divider()
 
     st.subheader("Matriz visual")
+
     matriz_visual = gerar_matriz_visual(df)
 
     st.dataframe(
@@ -351,6 +406,7 @@ with aba4:
         data=matriz_visual.to_csv(index=False).encode("utf-8-sig"),
         file_name="matriz_album_copa_2026.csv",
         mime="text/csv",
+        key="baixar_matriz_csv",
     )
 
 with aba5:
@@ -369,6 +425,7 @@ with aba5:
         data=faltantes.to_csv(index=False).encode("utf-8-sig"),
         file_name="faltantes_album_copa_2026.csv",
         mime="text/csv",
+        key="baixar_faltantes_csv",
     )
 
 st.divider()
